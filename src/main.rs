@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use axum::{
     routing::{get, post},
     Router,
@@ -15,6 +17,11 @@ use crate::{
     middleware::auth::auth_middleware,
     routes::{auth, protected},
 };
+
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub users: Arc<Mutex<Vec<models::User>>>
+}
 
 #[tokio::main]
 async fn main() {
@@ -40,6 +47,8 @@ async fn main() {
     )]
     struct ApiDoc;
 
+    let state = AppState { users: Arc::new(Mutex::new(vec![])) };
+
     let app = Router::new()
         .route("/admin", get(protected::admin_route))
         .route("/admin/dashboard", get(protected::admin_dashboard))
@@ -48,7 +57,8 @@ async fn main() {
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/login", post(auth::login))
         .route("/register", post(auth::register))
-        .layer(CorsLayer::permissive());
+        .layer(CorsLayer::permissive())
+        .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("Server running on http://0.0.0.0:3000");

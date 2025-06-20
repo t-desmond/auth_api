@@ -1,14 +1,19 @@
+use axum::extract::State;
 use axum::{http::StatusCode, response::IntoResponse, Json};
+use bcrypt::hash_with_salt;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use utoipa::OpenApi;
 
 use crate::middleware::auth::Claims;
-use crate::models::{LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, Role};
+use crate::models::{LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, Role, User};
+use crate::AppState;
+
+const JWT_SALT: &[u8; 16] = b"your-16-byte-str";
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(login, register), 
+    paths(login, register),
     components(schemas(LoginRequest, LoginResponse, RegisterRequest, RegisterResponse))
 )]
 pub struct AuthApi;
@@ -22,112 +27,78 @@ pub struct AuthApi;
         (status = 401, description = "Invalid credentials")
     )
 )]
-pub async fn login(Json(payload): Json<LoginRequest>) -> impl IntoResponse {
-    // In production, verify against a database
-    if payload.username == "admin" && payload.password == "password" {
-        let claims = Claims {
-            sub: payload.username.clone(),
-            role: Role::Admin,
-            exp: (chrono::Utc::now() + chrono::Duration::hours(24)).timestamp() as usize,
-        };
+pub async fn login(
+    State(state): State<AppState>,
+    Json(payload): Json<LoginRequest>,
+) -> impl IntoResponse {
+    let users = state.users.lock().unwrap();
 
-        let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
-        
-        match encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(jwt_secret.as_bytes()),
-        ) {
-            Ok(token) => {
-                return (StatusCode::OK, Json(LoginResponse { token })).into_response();
-            }
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Token generation failed"})),
-                ).into_response();
-            }
-        }
-    } else if payload.username == "user" && payload.password == "password" {
-        let claims = Claims {
-            sub: payload.username.clone(),
-            role: Role::User,
-            exp: (chrono::Utc::now() + chrono::Duration::hours(24)).timestamp() as usize,
-        };
+    // Check if the user exists
+    let user = users.iter().find(|user| user.username == payload.username);
 
-        let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "your-secret-key".to_string());
-        
-        match encode(
-            &Header::default(),
-            &claims,
-            &EncodingKey::from_secret(jwt_secret.as_bytes()),
-        ) {
-            Ok(token) => {
-                return (StatusCode::OK, Json(LoginResponse { token })).into_response();
-            }
-            Err(_) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": "Token generation failed"})),
-                ).into_response();
-            }
-        }
+    if user.is_none() || bcrypt::verify(payload.password.as_bytes(), &user.unwrap().password).ok() != Some(true){
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid credentials"})),
+        )
+            .into_response();
     }
 
+    let claims = Claims {
+        sub: payload.username.clone(),
+        role: user.unwrap().role.clone(),
+        exp: (chrono::Utc::now() + chrono::Duration::days(1)).timestamp() as usize,
+    };
+
+    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(JWT_SALT)).unwrap();
+
     (
-        StatusCode::UNAUTHORIZED,
-        Json(json!({"error": "Invalid credentials"})),
-    ).into_response()
+        StatusCode::OK,
+        Json(LoginResponse { token }),
+    )
+        .into_response()
 }
 
 #[utoipa::path(
     post,
     path = "/register",
-    request_body = RegisterRequest,
+    request_body = LoginRequest,
     responses(
-        (status = 201, description = "User registered successfully", body = RegisterResponse),
-        (status = 400, description = "Bad request - validation errors"),
-        (status = 409, description = "Username already exists")
+        (status = 200, description = "User regisered successfully", body = LoginResponse),
+        (status = 401, description = "Bad request")
     )
 )]
-pub async fn register(Json(payload): Json<RegisterRequest>) -> impl IntoResponse {
-    // Validate input
-    if payload.username.trim().is_empty() {
+pub async fn register(
+    State(state): State<AppState>,
+    Json(payload): Json<LoginRequest>,
+) -> impl IntoResponse {
+    // In production, verify against a database
+    if payload.username.is_empty() || payload.password.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Username cannot be empty"})),
-        ).into_response();
+            Json(json!({"error": "Username and password are required"})),
+        )
+            .into_response();
     }
 
-    if payload.password.len() < 6 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Password must be at least 6 characters long"})),
-        ).into_response();
-    }
+    // Here you would typically hash the password and save the user to a database
+    let hashed_password =
+        hash_with_salt(payload.password.as_bytes(), bcrypt::DEFAULT_COST, *JWT_SALT).unwrap();
 
-    if payload.password != payload.confirm_password {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Passwords do not match"})),
-        ).into_response();
-    }
+    let mut users = state.users.lock().unwrap();
 
-    // In production, check if username already exists in database
-    if payload.username == "admin" || payload.username == "test" || payload.username == "user" {
-        return (
-            StatusCode::CONFLICT,
-            Json(json!({"error": "Username already exists"})),
-        ).into_response();
-    }
-
-    let user_id = 42;
-
-    let response = RegisterResponse {
-        message: "User registered successfully".to_string(),
-        user_id,
+    let new_user = User {
+        id: users.len() as i32 + 1,
         username: payload.username,
+        password: hashed_password.to_string(),
+        role: Role::User,
     };
 
-    (StatusCode::CREATED, Json(response)).into_response()
+    users.push(new_user);
+
+    (
+        StatusCode::CREATED,
+        Json(json!({"message": "User registered successfully"})),
+    )
+        .into_response()
 }
