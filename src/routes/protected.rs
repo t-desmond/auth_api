@@ -12,7 +12,7 @@ use crate::models::{Role, User};
 
 #[derive(OpenApi)]
 #[openapi(
-  paths(admin_route),
+  paths(admin_route, admin_dashboard, user_profile),
   components(schemas(User))
 )]
 pub struct ProtectedApi;
@@ -28,7 +28,7 @@ pub struct ProtectedApi;
 )]
 pub async fn admin_route(Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
   if user.role == Role::Admin {
-      (StatusCode::OK, Json(user)).into_response()
+      (StatusCode::OK, Json(&user)).into_response()
   } else {
       (
           StatusCode::FORBIDDEN,
@@ -62,6 +62,43 @@ pub async fn admin_dashboard(Extension(user): Extension<Arc<User>>) -> impl Into
       (
           StatusCode::FORBIDDEN,
           Json(json!({"error": "Admin access required"})),
+      ).into_response()
+  }
+}
+
+#[utoipa::path(
+  get,
+  path = "/user/profile",
+  responses(
+      (status = 200, description = "User profile data"),
+      (status = 403, description = "Forbidden - User access required")
+  ),
+  security(("api_key" = []))
+)]
+pub async fn user_profile(Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
+  if user.role == Role::User {
+      let profile_data = json!({
+          "message": "Welcome to your profile",
+          "user": {
+              "id": user.id,
+              "username": &user.username,
+              "role": &user.role
+          },
+          "preferences": {
+              "theme": "light",
+              "notifications": true,
+              "language": "en"
+          },
+          "activity": {
+              "last_login": "2024-01-15T10:30:00Z",
+              "login_count": 42
+          }
+      });
+      (StatusCode::OK, Json(profile_data)).into_response()
+  } else {
+      (
+          StatusCode::FORBIDDEN,
+          Json(json!({"error": "User access required"})),
       ).into_response()
   }
 }

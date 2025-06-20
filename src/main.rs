@@ -2,6 +2,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use dotenv::dotenv;
 use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
@@ -17,6 +18,7 @@ use crate::{
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
     #[derive(OpenApi)]
     #[openapi(
         info(title = "Auth API", description = "A simple auth API with registration and admin routes"),
@@ -24,7 +26,8 @@ async fn main() {
             auth::login, 
             auth::register, 
             protected::admin_route, 
-            protected::admin_dashboard
+            protected::admin_dashboard,
+            protected::user_profile
         ),
         components(schemas(
             models::User,
@@ -40,6 +43,7 @@ async fn main() {
     let app = Router::new()
         .route("/admin", get(protected::admin_route))
         .route("/admin/dashboard", get(protected::admin_dashboard))
+        .route("/user/profile", get(protected::user_profile))
         .layer(axum::middleware::from_fn(auth_middleware))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/login", post(auth::login))
