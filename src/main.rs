@@ -20,7 +20,7 @@ async fn main() {
     #[derive(OpenApi)]
     #[openapi(
         info(title = "Auth API", description = "A simple auth API"),
-        paths(auth::login, protected::admin_route),
+        paths(auth::login, protected::admin_route, protected::admin_dashboard),
         components(schemas(
             models::User,
             models::Role,
@@ -32,6 +32,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/admin", get(protected::admin_route))
+        .route("/admin/dashboard", get(protected::admin_dashboard))
         .layer(axum::middleware::from_fn(auth_middleware))
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/login", post(auth::login))

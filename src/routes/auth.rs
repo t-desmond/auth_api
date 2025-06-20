@@ -1,4 +1,5 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
+use dotenv::dotenv;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use utoipa::OpenApi;
@@ -20,6 +21,7 @@ pub struct AuthApi;
   )
 )]
 pub async fn login(Json(payload): Json<LoginRequest>) -> impl IntoResponse {
+  dotenv().ok();
     // In production, verify against a database
     if payload.username == "admin" && payload.password == "password" {
         let claims = Claims {

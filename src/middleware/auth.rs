@@ -4,6 +4,7 @@ use axum::{
   middleware::Next,
   response::Response,
 };
+use dotenv::dotenv;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -21,6 +22,7 @@ pub async fn auth_middleware (
   req: Request<Body>,
   next: Next,
 ) -> Result<Response, StatusCode> {
+  dotenv().ok();
   let auth_header = req
       .headers()
       .get("Authorization")
