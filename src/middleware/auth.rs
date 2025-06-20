@@ -31,7 +31,11 @@ pub async fn auth_middleware (
       .strip_prefix("Bearer ")
       .ok_or(StatusCode::UNAUTHORIZED)?;
 
-  let key = DecodingKey::from_secret("your-secret-key".as_ref());
+  // Load JWT secret from environment variables
+  let jwt_secret = std::env::var("JWT_SECRET")
+      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+  let key = DecodingKey::from_secret(jwt_secret.as_bytes());
   let token_data = decode::<Claims>(token, &key, &Validation::default())
       .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
