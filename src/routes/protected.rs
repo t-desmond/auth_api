@@ -8,12 +8,12 @@ use serde_json::json;
 use std::sync::Arc;
 use utoipa::OpenApi;
 
-use crate::{models::{Role, User}, AppState};
+use crate::{models::Role, AppState};
+use crate::middleware::auth::Claims;
 
 #[derive(OpenApi)]
 #[openapi(
-  paths(admin_route, admin_dashboard, user_profile),
-  components(schemas(User))
+  paths(admin_route, admin_dashboard, user_profile)
 )]
 pub struct ProtectedApi;
 
@@ -21,14 +21,21 @@ pub struct ProtectedApi;
   get,
   path = "/admin",
   responses(
-      (status = 200, description = "Admin access granted", body = User),
+      (status = 200, description = "Admin access granted"),
       (status = 403, description = "Forbidden")
   ),
   security(("api_key" = []))
 )]
-pub async fn admin_route(Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
-  if user.role == Role::Admin {
-      (StatusCode::OK, Json(&user)).into_response()
+pub async fn admin_route(Extension(claims): Extension<Arc<Claims>>) -> impl IntoResponse {
+  if claims.role == Role::Admin {
+      let admin_data = json!({
+          "message": "Admin access granted",
+          "user": {
+              "email": claims.sub,
+              "role": claims.role
+          }
+      });
+      (StatusCode::OK, Json(admin_data)).into_response()
   } else {
       (
           StatusCode::FORBIDDEN,
@@ -46,11 +53,14 @@ pub async fn admin_route(Extension(user): Extension<Arc<User>>) -> impl IntoResp
   ),
   security(("api_key" = []))
 )]
-pub async fn admin_dashboard(Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
-  if user.role == Role::Admin {
+pub async fn admin_dashboard(Extension(claims): Extension<Arc<Claims>>) -> impl IntoResponse {
+  if claims.role == Role::Admin {
       let dashboard_data = json!({
           "message": "Welcome to the admin dashboard",
-          "user": &user,
+          "user": {
+              "email": claims.sub,
+              "role": claims.role
+          },
           "stats": {
               "total_users": 150,
               "active_sessions": 23,
@@ -75,14 +85,19 @@ pub async fn admin_dashboard(Extension(user): Extension<Arc<User>>) -> impl Into
   ),
   security(("api_key" = []))
 )]
-pub async fn user_profile(State(state): State<AppState>, Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
-  if user.role == Role::User {
+pub async fn user_profile(State(state): State<AppState>, Extension(claims): Extension<Arc<Claims>>) -> impl IntoResponse {
+  if claims.role == Role::User {
+      // Get full user data from state if needed
+      let users = state.users.lock().unwrap();
+      let user = users.iter().find(|u| u.email == claims.sub);
+      
       let profile_data = json!({
           "message": "Welcome to your profile",
           "user": {
-              "id": user.id,
-              "username": &user.email,
-              "role": &user.role
+              "email": claims.sub,
+              "role": claims.role,
+              "first_name": user.map(|u| &u.first_name).unwrap_or(&"".to_string()),
+              "last_name": user.map(|u| &u.last_name).unwrap_or(&"".to_string()),
           },
           "preferences": {
               "theme": "light",
