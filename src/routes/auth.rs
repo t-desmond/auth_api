@@ -1,6 +1,5 @@
 use axum::extract::State;
 use axum::{http::StatusCode, response::IntoResponse, Json};
-use bcrypt::hash_with_salt;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::json;
 use utoipa::OpenApi;
@@ -8,8 +7,6 @@ use utoipa::OpenApi;
 use crate::middleware::auth::Claims;
 use crate::models::{LoginRequest, LoginResponse, RegisterRequest, RegisterResponse, Role, User};
 use crate::AppState;
-
-const JWT_SALT: &[u8; 16] = b"your-16-byte-str";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -34,7 +31,7 @@ pub async fn login(
     let users = state.users.lock().unwrap();
 
     // Check if the user exists
-    let user = users.iter().find(|user| user.username == payload.username);
+    let user = users.iter().find(|user| user.email == payload.email);
 
     if user.is_none() || bcrypt::verify(payload.password.as_bytes(), &user.unwrap().password).ok() != Some(true){
         return (
@@ -45,12 +42,16 @@ pub async fn login(
     }
 
     let claims = Claims {
-        sub: payload.username.clone(),
+        sub: payload.email.clone(),
         role: user.unwrap().role.clone(),
         exp: (chrono::Utc::now() + chrono::Duration::days(1)).timestamp() as usize,
     };
 
-    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(JWT_SALT)).unwrap();
+    let config = state.config.clone();
+
+    let key = EncodingKey::from_secret(config.jwt_secret.as_bytes());
+
+    let token = encode(&Header::default(), &claims, &key).unwrap();
 
     (
         StatusCode::OK,
@@ -62,43 +63,51 @@ pub async fn login(
 #[utoipa::path(
     post,
     path = "/register",
-    request_body = LoginRequest,
+    request_body = RegisterRequest,
     responses(
-        (status = 200, description = "User regisered successfully", body = LoginResponse),
-        (status = 401, description = "Bad request")
+        (status = 201, description = "User registered successfully", body = RegisterResponse),
+        (status = 400, description = "Bad request")
     )
 )]
 pub async fn register(
     State(state): State<AppState>,
-    Json(payload): Json<LoginRequest>,
+    Json(payload): Json<RegisterRequest>,
 ) -> impl IntoResponse {
     // In production, verify against a database
-    if payload.username.is_empty() || payload.password.is_empty() {
+    if payload.email.is_empty() || payload.password.is_empty() || payload.first_name.is_empty() || payload.last_name.is_empty() {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Username and password are required"})),
+            Json(json!({"error": "All fields are required"})),
         )
             .into_response();
     }
 
-    // Here you would typically hash the password and save the user to a database
     let hashed_password =
-        hash_with_salt(payload.password.as_bytes(), bcrypt::DEFAULT_COST, *JWT_SALT).unwrap();
+        bcrypt::hash(payload.password.as_bytes(), bcrypt::DEFAULT_COST)
+        .unwrap();
 
     let mut users = state.users.lock().unwrap();
 
     let new_user = User {
-        id: users.len() as i32 + 1,
-        username: payload.username,
+        id: users.len() as u32 + 1,
+        email: payload.email.clone(),
         password: hashed_password.to_string(),
         role: Role::User,
+        first_name: payload.first_name.clone(),
+        last_name: payload.last_name.clone(),
     };
 
+    let user_id = new_user.id;
     users.push(new_user);
 
     (
         StatusCode::CREATED,
-        Json(json!({"message": "User registered successfully"})),
+        Json(RegisterResponse {
+            id: user_id,
+            first_name: payload.first_name,
+            last_name: payload.last_name,
+            email: payload.email,
+        }),
     )
         .into_response()
 }

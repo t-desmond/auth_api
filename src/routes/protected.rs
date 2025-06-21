@@ -1,5 +1,5 @@
 use axum::{
-  extract::Extension,
+  extract::{Extension, State},
   http::StatusCode,
   response::IntoResponse,
   Json,
@@ -8,7 +8,7 @@ use serde_json::json;
 use std::sync::Arc;
 use utoipa::OpenApi;
 
-use crate::models::{Role, User};
+use crate::{models::{Role, User}, AppState};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -75,13 +75,13 @@ pub async fn admin_dashboard(Extension(user): Extension<Arc<User>>) -> impl Into
   ),
   security(("api_key" = []))
 )]
-pub async fn user_profile(Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
+pub async fn user_profile(State(state): State<AppState>, Extension(user): Extension<Arc<User>>) -> impl IntoResponse {
   if user.role == Role::User {
       let profile_data = json!({
           "message": "Welcome to your profile",
           "user": {
               "id": user.id,
-              "username": &user.username,
+              "username": &user.email,
               "role": &user.role
           },
           "preferences": {
